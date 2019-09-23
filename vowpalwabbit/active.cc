@@ -8,39 +8,41 @@
 
 using namespace LEARNER;
 using namespace std;
+using namespace VW::config;
+
 float get_active_coin_bias(float k, float avg_loss, float g, float c0)
 {
-  float b,sb,rs,sl;
-  b=(float)(c0*(log(k+1.)+0.0001)/(k+0.0001));
-  sb=sqrt(b);
-  avg_loss = min(1.f, max(0.f, avg_loss)); //loss should be in [0,1]
+  float b, sb, rs, sl;
+  b = (float)(c0 * (log(k + 1.) + 0.0001) / (k + 0.0001));
+  sb = sqrt(b);
+  avg_loss = min(1.f, max(0.f, avg_loss));  // loss should be in [0,1]
 
-  sl=sqrt(avg_loss)+sqrt(avg_loss+g);
-  if (g<=sb*sl+b)
+  sl = sqrt(avg_loss) + sqrt(avg_loss + g);
+  if (g <= sb * sl + b)
     return 1;
-  rs = (sl+sqrt(sl*sl+4*g))/(2*g);
-  return b*rs*rs;
+  rs = (sl + sqrt(sl * sl + 4 * g)) / (2 * g);
+  return b * rs * rs;
 }
 
 float query_decision(active& a, float ec_revert_weight, float k)
 {
   float bias, avg_loss, weighted_queries;
-  if (k<=1.)
-    bias=1.;
+  if (k <= 1.)
+    bias = 1.;
   else
   {
     weighted_queries = (float)a.all->sd->weighted_labeled_examples;
-    avg_loss = (float)(a.all->sd->sum_loss/k + sqrt((1.+0.5*log(k))/(weighted_queries+0.0001)));
-    bias = get_active_coin_bias(k, avg_loss, ec_revert_weight/k, a.active_c0);
+    avg_loss = (float)(a.all->sd->sum_loss / k + sqrt((1. + 0.5 * log(k)) / (weighted_queries + 0.0001)));
+    bias = get_active_coin_bias(k, avg_loss, ec_revert_weight / k, a.active_c0);
   }
-  if(merand48(a.all->random_state) < bias)
+  if (merand48(a.all->random_state) < bias)
     return 1.f / bias;
   else
     return -1.;
 }
 
 template <bool is_learn>
-void predict_or_learn_simulation(active& a, base_learner& base, example& ec)
+void predict_or_learn_simulation(active& a, single_learner& base, example& ec)
 {
   base.predict(ec);
 
@@ -54,7 +56,7 @@ void predict_or_learn_simulation(active& a, base_learner& base, example& ec)
     ec.confidence = fabsf(ec.pred.scalar - threshold) / base.sensitivity(ec);
     float importance = query_decision(a, ec.confidence, k);
 
-    if(importance > 0)
+    if (importance > 0)
     {
       all.sd->queries += 1;
       ec.weight *= importance;
@@ -69,7 +71,7 @@ void predict_or_learn_simulation(active& a, base_learner& base, example& ec)
 }
 
 template <bool is_learn>
-void predict_or_learn_active(active& a, base_learner& base, example& ec)
+void predict_or_learn_active(active& a, single_learner& base, example& ec)
 {
   if (is_learn)
     base.learn(ec);
@@ -88,16 +90,11 @@ void active_print_result(int f, float res, float weight, v_array<char> tag)
   if (f >= 0)
   {
     std::stringstream ss;
-    char temp[30];
-    sprintf(temp, "%f", res);
-    ss << temp;
-    if(!print_tag(ss, tag))
+    ss << std::fixed << res;
+    if (!print_tag(ss, tag))
       ss << ' ';
-    if(weight >= 0)
-    {
-      sprintf(temp, " %f", weight);
-      ss << temp;
-    }
+    if (weight >= 0)
+      ss << " " << std::fixed << weight;
     ss << '\n';
     ssize_t len = ss.str().size();
     ssize_t t = io_buf::write_file_or_socket(f, ss.str().c_str(), (unsigned int)len);
@@ -112,15 +109,15 @@ void output_and_account_example(vw& all, active& a, example& ec)
 
   all.sd->update(ec.test_only, ld.label != FLT_MAX, ec.loss, ec.weight, ec.num_features);
   if (ld.label != FLT_MAX && !ec.test_only)
-    all.sd->weighted_labels += ld.label * ec.weight;
+    all.sd->weighted_labels += ((double)ld.label) * ec.weight;
   all.sd->weighted_unlabeled_examples += ld.label == FLT_MAX ? ec.weight : 0;
 
-  float ai=-1;
-  if(ld.label == FLT_MAX)
-    ai=query_decision(a, ec.confidence, (float)all.sd->weighted_unlabeled_examples);
+  float ai = -1;
+  if (ld.label == FLT_MAX)
+    ai = query_decision(a, ec.confidence, (float)all.sd->weighted_unlabeled_examples);
 
   all.print(all.raw_prediction, ec.partial_prediction, -1, ec.tag);
-  for (size_t i = 0; i<all.final_prediction_sink.size(); i++)
+  for (size_t i = 0; i < all.final_prediction_sink.size(); i++)
   {
     int f = (int)all.final_prediction_sink[i];
     active_print_result(f, ec.pred.scalar, ai, ec.tag);
@@ -132,43 +129,41 @@ void output_and_account_example(vw& all, active& a, example& ec)
 void return_active_example(vw& all, active& a, example& ec)
 {
   output_and_account_example(all, a, ec);
-  VW::finish_example(all,&ec);
+  VW::finish_example(all, ec);
 }
 
-base_learner* active_setup(vw& all)
+base_learner* active_setup(options_i& options, vw& all)
 {
-  //parse and set arguments
-  if(missing_option(all, false, "active", "enable active learning")) return nullptr;
-  new_options(all, "Active Learning options")
-  ("simulation", "active learning simulation mode")
-  ("mellowness", po::value<float>(), "active learning mellowness parameter c_0. Default 8");
-  add_options(all);
+  auto data = scoped_calloc_or_throw<active>();
 
-  active& data = calloc_or_throw<active>();
-  data.active_c0 = 8;
-  data.all=&all;
+  bool active_option = false;
+  bool simulation = false;
+  option_group_definition new_options("Active Learning");
+  new_options.add(make_option("active", active_option).keep().help("enable active learning"))
+      .add(make_option("simulation", simulation).help("active learning simulation mode"))
+      .add(make_option("mellowness", data->active_c0)
+               .default_value(8.f)
+               .help("active learning mellowness parameter c_0. Default 8"));
+  options.add_and_parse(new_options);
 
-  if (all.vm.count("mellowness"))
-    data.active_c0 = all.vm["mellowness"].as<float>();
+  if (!active_option)
+    return nullptr;
 
-  if (count(all.args.begin(), all.args.end(), "--lda") != 0)
-  {
-    free(&data);
+  data->all = &all;
+
+  if (options.was_supplied("lda"))
     THROW("error: you can't combine lda and active learning");
-  }
 
-  base_learner* base = setup_base(all);
+  auto base = as_singleline(setup_base(options, all));
 
-  //Create new learner
-  learner<active>* l;
-  if (all.vm.count("simulation"))
-    l = &init_learner(&data, base, predict_or_learn_simulation<true>,
-                      predict_or_learn_simulation<false>);
+  // Create new learner
+  learner<active, example>* l;
+  if (options.was_supplied("simulation"))
+    l = &init_learner(data, base, predict_or_learn_simulation<true>, predict_or_learn_simulation<false>);
   else
   {
     all.active = true;
-    l = &init_learner(&data, base, predict_or_learn_active<true>,
-                      predict_or_learn_active<false>);
+    l = &init_learner(data, base, predict_or_learn_active<true>, predict_or_learn_active<false>);
     l->set_finish_example(return_active_example);
   }
 

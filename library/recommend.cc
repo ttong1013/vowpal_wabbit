@@ -78,8 +78,8 @@ typedef pair<float, string> scored_example;
 vector<scored_example> scored_examples;
 
 struct compare_scored_examples
-{ bool operator()(scored_example const& a, scored_example const& b) const
-  { return a.first > b.first;
+{ bool operator()(scored_example const& lhs, scored_example const& rhs) const
+  { return lhs.first > rhs.first;
   }
 };
 
@@ -191,7 +191,7 @@ int main(int argc, char *argv[])
 
       if (!bf_hit(bf,estr))
       { example *ex = VW::read_example(*model, estr);
-        model->learn(ex);
+        model->learn(*ex);
 
         const string str(estr);
 
@@ -203,7 +203,7 @@ int main(int argc, char *argv[])
           pr_queue.push(make_pair(ex->pred.scalar, str));
         }
 
-        VW::finish_example(*model, ex);
+        VW::finish_example(*model, *ex);
       }
       else
       { skipped++;

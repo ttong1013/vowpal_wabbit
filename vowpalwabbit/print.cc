@@ -3,9 +3,14 @@
 #include "reductions.h"
 
 using namespace std;
-struct print { vw* all; }; //regressor, feature loop
+using namespace VW::config;
 
-void print_feature(vw& all, float value, uint64_t index)
+struct print
+{
+  vw* all;
+};  // regressor, feature loop
+
+void print_feature(vw& /* all */, float value, uint64_t index)
 {
   cout << index;
   if (value != 1.)
@@ -36,15 +41,21 @@ void learn(print& p, LEARNER::base_learner&, example& ec)
   cout << endl;
 }
 
-LEARNER::base_learner* print_setup(vw& all)
+LEARNER::base_learner* print_setup(options_i& options, vw& all)
 {
-  if (missing_option(all, true, "print", "print examples")) return nullptr;
+  bool print_option = false;
+  option_group_definition new_options("Print psuedolearner");
+  new_options.add(make_option("print", print_option).keep().help("print examples"));
+  options.add_and_parse(new_options);
 
-  print& p = calloc_or_throw<print>();
-  p.all = &all;
+  if (!print_option)
+    return nullptr;
+
+  auto p = scoped_calloc_or_throw<print>();
+  p->all = &all;
 
   all.weights.stride_shift(0);
 
-  LEARNER::learner<print>& ret = init_learner(&p, learn, 1);
+  LEARNER::learner<print, example>& ret = init_learner(p, learn, learn, 1);
   return make_base(ret);
 }

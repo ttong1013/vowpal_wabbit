@@ -1,32 +1,12 @@
-language: cpp
-compiler:
-  - gcc
+sudo: required
+os: linux
+services:
+  - docker
+
 before_install:
-  - sudo apt-get update -qq
-  - sudo apt-get install -qq libboost-all-dev
-  - sudo apt-get install maven
-  - sudo pip install cpp-coveralls wheel
-  # use miniconda for python package testing
-  - wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh;
-  - bash miniconda.sh -b -p $HOME/miniconda
-  - export PATH="$HOME/miniconda/bin:$PATH"
-  - hash -r
-  - conda config --set always_yes yes --set changeps1 no
-  - conda update -q conda
-  - conda create -q -n test-python27 python=2.7 nomkl numpy scipy scikit-learn
+  - docker pull vowpalwabbit/ubuntu1404-build:0.1.0
 script:
-  - make all
-  - make python
-  - mvn clean test -f java/pom.xml
-  - make test
-  - make test_gcov --always-make
-  - cd python
-  - source activate test-python27
-  - pip install pytest readme_renderer
-  - python setup.py check -mrs
-  - python setup.py install
-  - py.test tests
-  - source deactivate
-  - cd ..
+  - docker run -a STDOUT -v `pwd`:/vw -t vowpalwabbit/ubuntu1404-build:0.1.0 /bin/bash -c "cd /vw && chmod +x ./build-linux.sh && ./build-linux.sh"
+
 after_success:
-  - coveralls --exclude lib --exclude tests --gcov-options '\-lp'
+  - docker run -e TRAVIS_JOB_ID -e TRAVIS_BRANCH -a STDOUT -v `pwd`:/vw -t vowpalwabbit/ubuntu1404-build:0.1.0 /bin/bash -c "cd /vw && coveralls --include explore --include vowpalwabbit --gcov-options '\-lp'"
